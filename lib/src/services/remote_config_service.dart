@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-/// Result of Remote Config check
 class RemoteConfigResult {
   final bool isAccessible;
   final Map<String, dynamic>? configValues;
@@ -35,18 +34,12 @@ class RemoteConfigResult {
   }
 }
 
-/// Service to check Firebase Remote Config accessibility
 class RemoteConfigService {
-  /// Checks if Firebase Remote Config is publicly accessible
-  ///
-  /// [googleAppId] - The Google App ID (e.g., "1:1092279052737:android:565c2d34e2a4e73a")
-  /// [apiKey] - The Google API Key (e.g., "AIzaSyAIc2gqTbZ88gKFoClbn8y0FYcAI2G1_Zo")
   static Future<RemoteConfigResult> checkRemoteConfig({
     required String googleAppId,
     required String apiKey,
   }) async {
     try {
-      // Extract project number from app ID (format: 1:PROJECT_NUMBER:android:hash)
       final parts = googleAppId.split(':');
       if (parts.length < 2) {
         return RemoteConfigResult.error('Invalid app ID format');
@@ -69,14 +62,12 @@ class RemoteConfigService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-        // Parse the entries from the response
         final entries = <String, dynamic>{};
 
         if (data.containsKey('entries')) {
           final rawEntries = data['entries'] as Map<String, dynamic>?;
           if (rawEntries != null) {
             for (final entry in rawEntries.entries) {
-              // Try to parse JSON values, otherwise keep as string
               try {
                 entries[entry.key] = jsonDecode(entry.value as String);
               } catch (_) {
@@ -88,7 +79,6 @@ class RemoteConfigService {
 
         return RemoteConfigResult.accessible(entries);
       } else if (response.statusCode == 403 || response.statusCode == 401) {
-        // Access denied - Remote Config is properly secured
         return RemoteConfigResult.secure();
       } else {
         return RemoteConfigResult.error(
@@ -100,8 +90,6 @@ class RemoteConfigService {
     }
   }
 
-  /// Checks multiple combinations of app IDs and API keys
-  /// Returns the first successful result or secure if none work
   static Future<RemoteConfigResult> checkMultipleCombinations({
     required List<String> googleAppIds,
     required List<String> apiKeys,

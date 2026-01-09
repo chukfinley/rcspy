@@ -4,7 +4,6 @@ import 'package:rcspy/src/services/apk_analyzer.dart';
 import 'package:rcspy/src/services/remote_config_service.dart';
 import 'package:rcspy/src/services/storage_service.dart';
 
-/// State for a single app's analysis
 class AppAnalysisState {
   final FirebaseAnalysisResult? apkResult;
   final RemoteConfigResult? rcResult;
@@ -33,7 +32,6 @@ class AppAnalysisState {
   }
 }
 
-/// Progress state for the overall analysis
 class AnalysisProgress {
   final int total;
   final int completed;
@@ -55,7 +53,6 @@ class AnalysisProgress {
   int get remaining => total - completed;
 }
 
-/// Filter options for app list
 enum AppFilter {
   all,
   vulnerable,
@@ -64,7 +61,6 @@ enum AppFilter {
   noFirebase,
 }
 
-/// Provider for managing app analysis state
 class AnalysisProvider extends ChangeNotifier {
   static const int _maxParallelAnalysis = 4;
 
@@ -76,7 +72,6 @@ class AnalysisProvider extends ChangeNotifier {
   int _newAppsCount = 0;
   AppFilter _currentFilter = AppFilter.all;
 
-  // Getters
   List<PackageInfo> get packages => _packages;
   AnalysisProgress get progress => _progress;
   bool get isLoadingPackages => _isLoadingPackages;
@@ -84,7 +79,6 @@ class AnalysisProvider extends ChangeNotifier {
   int get newAppsCount => _newAppsCount;
   AppFilter get currentFilter => _currentFilter;
 
-  /// Get filtered packages based on current filter
   List<PackageInfo> get filteredPackages {
     if (_currentFilter == AppFilter.all) {
       return _packages;
@@ -113,7 +107,6 @@ class AnalysisProvider extends ChangeNotifier {
     }).toList();
   }
 
-  /// Set the current filter
   void setFilter(AppFilter filter) {
     if (_currentFilter != filter) {
       _currentFilter = filter;
@@ -121,18 +114,14 @@ class AnalysisProvider extends ChangeNotifier {
     }
   }
 
-  /// Get analysis state for a specific package (doesn't trigger rebuild)
   AppAnalysisState? getState(String packageId) => _analysisStates[packageId];
 
-  /// Load all installed packages and cached results
   Future<void> loadPackages() async {
     _isLoadingPackages = true;
     notifyListeners();
 
-    // Initialize storage
     await StorageService.init();
 
-    // Load cached results first
     final cachedData = StorageService.loadCache();
     int cachedFirebase = 0;
     int cachedVulnerable = 0;
@@ -147,20 +136,17 @@ class AnalysisProvider extends ChangeNotifier {
       if (data.rcAccessible == true) cachedVulnerable++;
     }
 
-    // Load installed packages
     _packages = await DevicePackages.getInstalledPackages(
       includeIcon: true,
       includeSystemPackages: false,
     );
 
-    // Sort packages alphabetically by name
     _packages.sort((a, b) {
       final nameA = (a.name ?? a.id ?? '').toLowerCase();
       final nameB = (b.name ?? b.id ?? '').toLowerCase();
       return nameA.compareTo(nameB);
     });
 
-    // Find new apps (not in cache)
     final analyzedIds = StorageService.getAnalyzedPackageIds();
     final newApps = _packages.where((p) {
       final id = _getPackageId(p);
@@ -171,7 +157,6 @@ class AnalysisProvider extends ChangeNotifier {
 
     _isLoadingPackages = false;
 
-    // Update progress with cached stats
     _progress = AnalysisProgress(
       total: _packages.length,
       completed: _packages.length - newApps.length,
@@ -183,44 +168,34 @@ class AnalysisProvider extends ChangeNotifier {
 
     notifyListeners();
 
-    // Only analyze new apps
     if (newApps.isNotEmpty) {
       await _analyzePackages(newApps, isFullReanalysis: false);
     }
   }
 
-  /// Re-analyze all packages (clears cache)
   Future<void> reanalyzeAll() async {
     if (_isAnalyzing) return;
 
-    // Clear cache
     await StorageService.clearCache();
     _analysisStates.clear();
 
-    // Analyze all packages
     await _analyzePackages(_packages, isFullReanalysis: true);
   }
 
-  /// Re-analyze a single package
   Future<void> reanalyzePackage(PackageInfo package) async {
     final packageId = _getPackageId(package);
 
-    // Remove from cache
     await StorageService.removeAppData(packageId);
 
-    // Mark as analyzing
     _analysisStates[packageId] = const AppAnalysisState(isAnalyzingApk: true);
     notifyListeners();
 
-    // Actually perform the analysis
     await _analyzePackage(package, saveToCache: true);
 
-    // Update progress stats
     _updateProgressStats();
     notifyListeners();
   }
 
-  /// Analyze a list of packages
   Future<void> _analyzePackages(
     List<PackageInfo> packagesToAnalyze, {
     required bool isFullReanalysis,
@@ -241,11 +216,9 @@ class AnalysisProvider extends ChangeNotifier {
     );
     notifyListeners();
 
-    // Process packages in batches
     final batches = _createBatches(packagesToAnalyze, _maxParallelAnalysis);
 
     for (final batch in batches) {
-      // Mark batch as analyzing
       for (final package in batch) {
         final packageId = _getPackageId(package);
         _analysisStates[packageId] = const AppAnalysisState(
@@ -254,20 +227,17 @@ class AnalysisProvider extends ChangeNotifier {
       }
       notifyListeners();
 
-      // Run batch in parallel
       final futures = batch
           .map((p) => _analyzePackage(p, saveToCache: true))
           .toList();
       final results = await Future.wait(futures);
 
-      // Update counters
       for (final result in results) {
         completed++;
         if (result.hasFirebase) withFirebase++;
         if (result.isVulnerable) vulnerable++;
       }
 
-      // Update progress
       _progress = AnalysisProgress(
         total: _packages.length,
         completed: completed,
@@ -277,7 +247,6 @@ class AnalysisProvider extends ChangeNotifier {
       notifyListeners();
     }
 
-    // Mark as complete
     _isAnalyzing = false;
     _newAppsCount = 0;
     _progress = AnalysisProgress(
@@ -290,7 +259,6 @@ class AnalysisProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Analyze a single package
   Future<({bool hasFirebase, bool isVulnerable})> _analyzePackage(
     PackageInfo package, {
     bool saveToCache = false,
@@ -317,17 +285,14 @@ class AnalysisProvider extends ChangeNotifier {
     }
 
     try {
-      // Analyze APK
       final apkResult = await ApkAnalyzer.analyzeApk(apkPath);
 
       bool isVulnerable = false;
       RemoteConfigResult? rcResult;
 
-      // If Firebase detected, check Remote Config
       if (apkResult.hasFirebase &&
           apkResult.googleAppIds.isNotEmpty &&
           apkResult.googleApiKeys.isNotEmpty) {
-        // Update state to show RC check
         _analysisStates[packageId] = AppAnalysisState(
           apkResult: apkResult,
           isAnalyzingApk: false,
@@ -354,7 +319,6 @@ class AnalysisProvider extends ChangeNotifier {
         );
       }
 
-      // Save to cache
       if (saveToCache) {
         await StorageService.saveAppData(
           CachedAppData(
@@ -389,7 +353,6 @@ class AnalysisProvider extends ChangeNotifier {
     }
   }
 
-  /// Update progress stats from current states
   void _updateProgressStats() {
     int withFirebase = 0;
     int vulnerable = 0;

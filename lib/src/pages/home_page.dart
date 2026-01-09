@@ -21,7 +21,6 @@ class HomePage extends StatelessWidget {
           ),
         ),
         actions: [
-          // Re-analyze all button
           Selector<AnalysisProvider, bool>(
             selector: (_, provider) => provider.isAnalyzing,
             builder: (context, isAnalyzing, _) {
@@ -44,7 +43,6 @@ class HomePage extends StatelessWidget {
               );
             },
           ),
-          // Settings button
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
@@ -89,7 +87,6 @@ class HomePage extends StatelessWidget {
   }
 
   Widget _buildBody(BuildContext context) {
-    // Use Selector for loading state - only rebuilds when isLoadingPackages changes
     return Selector<AnalysisProvider, bool>(
       selector: (_, provider) => provider.isLoadingPackages,
       builder: (context, isLoading, _) {
@@ -112,7 +109,6 @@ class HomePage extends StatelessWidget {
   }
 }
 
-/// Separate widget for the app list with header
 class _AppListWithHeader extends StatelessWidget {
   const _AppListWithHeader();
 
@@ -120,13 +116,10 @@ class _AppListWithHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Progress/Stats header - uses Selector for efficient updates
         const _ProgressHeader(),
         const SizedBox(height: 8),
-        // Filter bar
         const _FilterBar(),
         const SizedBox(height: 8),
-        // App list
         Expanded(
           child: Selector<AnalysisProvider,
               ({List<PackageInfo> packages, AppFilter filter})>(
@@ -176,7 +169,6 @@ class _AppListWithHeader extends StatelessWidget {
   }
 }
 
-/// Filter bar for filtering apps
 class _FilterBar extends StatelessWidget {
   const _FilterBar();
 
@@ -330,7 +322,6 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-/// Progress header that only shows during analysis
 class _ProgressHeader extends StatelessWidget {
   const _ProgressHeader();
 
@@ -357,7 +348,6 @@ class _ProgressHeader extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                // Progress info text
                 if (data.newApps > 0 && data.progress.cached > 0)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -370,7 +360,6 @@ class _ProgressHeader extends StatelessWidget {
                     ),
                   ),
 
-                // Progress bar
                 Row(
                   children: [
                     Expanded(

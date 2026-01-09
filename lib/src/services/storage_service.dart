@@ -4,7 +4,6 @@ import 'package:rcspy/src/services/apk_analyzer.dart';
 import 'package:rcspy/src/services/remote_config_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Cached data for a single app
 class CachedAppData {
   final String packageId;
   final bool hasFirebase;
@@ -52,7 +51,6 @@ class CachedAppData {
     );
   }
 
-  /// Convert to FirebaseAnalysisResult
   FirebaseAnalysisResult toApkResult() {
     if (error != null) {
       return FirebaseAnalysisResult.error(error!);
@@ -64,7 +62,6 @@ class CachedAppData {
     );
   }
 
-  /// Convert to RemoteConfigResult (if available)
   RemoteConfigResult? toRcResult() {
     if (rcAccessible == null) return null;
     if (rcAccessible!) {
@@ -74,19 +71,16 @@ class CachedAppData {
   }
 }
 
-/// Service for persisting analysis results to local storage
 class StorageService {
   static const String _cacheKey = 'analysis_cache';
   static const String _analyzedPackagesKey = 'analyzed_packages';
 
   static SharedPreferences? _prefs;
 
-  /// Initialize shared preferences
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
   }
 
-  /// Get all cached analysis data
   static Map<String, CachedAppData> loadCache() {
     final prefs = _prefs;
     if (prefs == null) return {};
@@ -106,31 +100,25 @@ class StorageService {
 
       return cache;
     } catch (e) {
-      // If cache is corrupted, return empty
       return {};
     }
   }
 
-  /// Save analysis data for a single app
   static Future<void> saveAppData(CachedAppData data) async {
     final prefs = _prefs;
     if (prefs == null) return;
 
-    // Load existing cache
     final cache = loadCache();
     cache[data.packageId] = data;
 
-    // Save updated cache
     final jsonMap = cache.map((key, value) => MapEntry(key, value.toJson()));
     await prefs.setString(_cacheKey, jsonEncode(jsonMap));
 
-    // Update analyzed packages set
     final analyzedPackages = getAnalyzedPackageIds();
     analyzedPackages.add(data.packageId);
     await prefs.setStringList(_analyzedPackagesKey, analyzedPackages.toList());
   }
 
-  /// Get set of package IDs that have been analyzed
   static Set<String> getAnalyzedPackageIds() {
     final prefs = _prefs;
     if (prefs == null) return {};
@@ -139,7 +127,6 @@ class StorageService {
     return list?.toSet() ?? {};
   }
 
-  /// Remove analysis data for a specific app
   static Future<void> removeAppData(String packageId) async {
     final prefs = _prefs;
     if (prefs == null) return;
@@ -155,7 +142,6 @@ class StorageService {
     await prefs.setStringList(_analyzedPackagesKey, analyzedPackages.toList());
   }
 
-  /// Clear all cached data
   static Future<void> clearCache() async {
     final prefs = _prefs;
     if (prefs == null) return;
@@ -164,7 +150,6 @@ class StorageService {
     await prefs.remove(_analyzedPackagesKey);
   }
 
-  /// Get cached data for a specific app
   static CachedAppData? getAppData(String packageId) {
     final cache = loadCache();
     return cache[packageId];

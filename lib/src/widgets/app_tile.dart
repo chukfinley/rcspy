@@ -14,7 +14,6 @@ class AppTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Use Selector to only rebuild when THIS app's state changes
     return Selector<AnalysisProvider, AppAnalysisState?>(
       selector: (_, provider) => provider.getState(_packageId),
       builder: (context, state, _) {
@@ -108,7 +107,6 @@ class AppTile extends StatelessWidget {
     final rcResult = state?.rcResult;
     final apkResult = state?.apkResult;
 
-    // If RC is publicly accessible, navigate to config page
     if (rcResult?.isAccessible == true) {
       Navigator.push(
         context,
@@ -120,7 +118,6 @@ class AppTile extends StatelessWidget {
         ),
       );
     } else if (apkResult?.hasFirebase == true) {
-      // Show Firebase details bottom sheet
       _showFirebaseDetails(context, apkResult!);
     }
   }
@@ -128,7 +125,6 @@ class AppTile extends StatelessWidget {
   Widget _buildSubtitle(AppAnalysisState? state) {
     final chips = <Widget>[];
 
-    // Waiting to be analyzed
     if (state == null || state.apkResult == null) {
       if (state?.isAnalyzingApk == true) {
         chips.add(
@@ -152,19 +148,16 @@ class AppTile extends StatelessWidget {
     final apkResult = state.apkResult!;
     final rcResult = state.rcResult;
 
-    // Error state
     if (apkResult.error != null) {
       chips.add(_buildChip('Error', Colors.red, Icons.error_outline));
       return Wrap(spacing: 6, runSpacing: 4, children: chips);
     }
 
-    // Firebase status
     if (apkResult.hasFirebase) {
       chips.add(
         _buildChip('Firebase', Colors.orange, Icons.local_fire_department),
       );
 
-      // RC status
       if (rcResult != null) {
         if (rcResult.isAccessible) {
           final count = rcResult.configValues?.length ?? 0;
@@ -180,7 +173,6 @@ class AppTile extends StatelessWidget {
           chips.add(_buildChip('RC Secure', Colors.green, Icons.lock));
         }
       } else {
-        // Missing credentials
         final hasAppId = apkResult.googleAppIds.isNotEmpty;
         final hasApiKey = apkResult.googleApiKeys.isNotEmpty;
         if (!hasAppId || !hasApiKey) {
@@ -350,7 +342,6 @@ class AppTile extends StatelessWidget {
               ),
               const SizedBox(height: 16),
 
-              // Google App IDs section
               if (apkResult.googleAppIds.isNotEmpty) ...[
                 const Text(
                   '🔥 Google App IDs:',
@@ -380,7 +371,6 @@ class AppTile extends StatelessWidget {
                 const SizedBox(height: 16),
               ],
 
-              // Google API Keys section
               if (apkResult.googleApiKeys.isNotEmpty) ...[
                 const Text(
                   '🔑 Google API Keys:',

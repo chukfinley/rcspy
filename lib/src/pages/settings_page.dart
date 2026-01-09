@@ -38,7 +38,6 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           const SizedBox(height: 8),
 
-          // Links Section
           _SectionHeader(title: 'Links'),
           _SettingsTile(
             icon: Icons.code,
@@ -64,7 +63,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
           const Divider(height: 32),
 
-          // Data Section
           _SectionHeader(title: 'Data'),
           _SettingsTile(
             icon: Icons.delete_outline,
@@ -75,7 +73,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
           const SizedBox(height: 32),
 
-          // Footer
           Center(
             child: Text(
               'Made with ❤️ for security researchers',

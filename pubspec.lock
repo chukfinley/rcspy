@@ -9,6 +9,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.0.7"
+  args:
+    dependency: transitive
+    description:
+      name: args
+      sha256: d0481093c50b1da8910eb0bb301626d4d8eb7284aa739614d2b394ee09e3ea04
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.7.0"
   async:
     dependency: transitive
     description:
@@ -49,6 +57,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
+  comments_remover:
+    dependency: "direct dev"
+    description:
+      name: comments_remover
+      sha256: "4e90bcb7e49a2b24ce206a2ad5d143aa4284347f53d286f9d2acbdc4fc948bc1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
   crypto:
     dependency: transitive
     description:

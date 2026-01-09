@@ -3,7 +3,6 @@ import 'dart:isolate';
 
 import 'package:archive/archive.dart';
 
-/// Result of APK analysis for Firebase detection
 class FirebaseAnalysisResult {
   final bool hasFirebase;
   final List<String> googleAppIds;
@@ -26,7 +25,6 @@ class FirebaseAnalysisResult {
     );
   }
 
-  /// Convert to Map for isolate communication
   Map<String, dynamic> toMap() => {
         'hasFirebase': hasFirebase,
         'googleAppIds': googleAppIds,
@@ -34,7 +32,6 @@ class FirebaseAnalysisResult {
         'error': error,
       };
 
-  /// Create from Map for isolate communication
   factory FirebaseAnalysisResult.fromMap(Map<String, dynamic> map) {
     return FirebaseAnalysisResult(
       hasFirebase: map['hasFirebase'] as bool,
@@ -45,8 +42,6 @@ class FirebaseAnalysisResult {
   }
 }
 
-/// Top-level function to run APK analysis in isolate
-/// Must be top-level for Isolate.run to work
 Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
   try {
     final file = File(apkPath);
@@ -55,16 +50,13 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
       return FirebaseAnalysisResult.error('APK file not found').toMap();
     }
 
-    // Read APK file bytes
     final bytes = await file.readAsBytes();
 
-    // Decode the APK as a ZIP archive
     final archive = ZipDecoder().decodeBytes(bytes);
 
     final Set<String> foundAppIds = {};
     final Set<String> foundApiKeys = {};
 
-    // Regular expressions
     final googleAppIdPattern = RegExp(
       r'\d+:\d+:android:[a-f0-9]+',
       caseSensitive: false,
@@ -73,7 +65,6 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
       r'AIza[0-9A-Za-z_-]{35}',
     );
 
-    // Search through all files in the archive
     for (final archiveFile in archive) {
       if (archiveFile.isFile) {
         final fileName = archiveFile.name.toLowerCase();
@@ -103,7 +94,6 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
   }
 }
 
-/// Static version for isolate - determines if a file should be analyzed
 bool _shouldAnalyzeFileStatic(String fileName) {
   return fileName.endsWith('.arsc') ||
       fileName.endsWith('.xml') ||
@@ -113,7 +103,6 @@ bool _shouldAnalyzeFileStatic(String fileName) {
       fileName.contains('firebase');
 }
 
-/// Static version for isolate - extracts credentials
 (Set<String>, Set<String>) _extractGoogleCredentialsStatic(
   List<int> content,
   RegExp appIdPattern,
@@ -135,13 +124,11 @@ bool _shouldAnalyzeFileStatic(String fileName) {
       foundApiKeys.add(match.group(0)!);
     }
   } catch (e) {
-    // Ignore parsing errors
   }
 
   return (foundAppIds, foundApiKeys);
 }
 
-/// Static version for isolate - extracts strings from bytes
 String _extractStringsFromBytesStatic(List<int> bytes) {
   final buffer = StringBuffer();
   final currentString = StringBuffer();
@@ -165,16 +152,9 @@ String _extractStringsFromBytesStatic(List<int> bytes) {
   return buffer.toString();
 }
 
-/// Service to analyze APK files for Firebase usage
 class ApkAnalyzer {
-  /// Analyzes an APK file to detect Firebase usage
-  /// Runs in a separate isolate to avoid blocking the main thread
-  ///
-  /// [apkPath] - Path to the APK file
-  /// Returns [FirebaseAnalysisResult] with detection results
   static Future<FirebaseAnalysisResult> analyzeApk(String apkPath) async {
     try {
-      // Run the heavy analysis in a separate isolate
       final resultMap = await Isolate.run(() => _analyzeApkInIsolate(apkPath));
       return FirebaseAnalysisResult.fromMap(resultMap);
     } catch (e) {
