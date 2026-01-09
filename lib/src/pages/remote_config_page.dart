@@ -1,0 +1,1024 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+enum ConfigViewMode { list, table, json }
+
+class RemoteConfigPage extends StatefulWidget {
+  const RemoteConfigPage({
+    super.key,
+    required this.appName,
+    required this.configValues,
+  });
+
+  final String appName;
+  final Map<String, dynamic> configValues;
+
+  @override
+  State<RemoteConfigPage> createState() => _RemoteConfigPageState();
+}
+
+class _RemoteConfigPageState extends State<RemoteConfigPage> {
+  ConfigViewMode _viewMode = ConfigViewMode.list;
+
+  List<String> get _sortedKeys => widget.configValues.keys.toList()..sort();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.appName,
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              '${_sortedKeys.length} config values',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.copy_all),
+            tooltip: 'Copy all as JSON',
+            onPressed: () => _copyAllAsJson(context),
+          ),
+        ],
+      ),
+      body: _sortedKeys.isEmpty
+          ? const _EmptyState()
+          : Column(
+              children: [
+                // View mode switcher
+                _ViewModeSwitcher(
+                  currentMode: _viewMode,
+                  onModeChanged: (mode) => setState(() => _viewMode = mode),
+                ),
+                // Content
+                Expanded(child: _buildContent()),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildContent() {
+    switch (_viewMode) {
+      case ConfigViewMode.list:
+        return _ListView(
+          sortedKeys: _sortedKeys,
+          configValues: widget.configValues,
+        );
+      case ConfigViewMode.table:
+        return _TableView(
+          sortedKeys: _sortedKeys,
+          configValues: widget.configValues,
+        );
+      case ConfigViewMode.json:
+        return _JsonView(configValues: widget.configValues);
+    }
+  }
+
+  void _copyAllAsJson(BuildContext context) {
+    final jsonString = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(widget.configValues);
+    Clipboard.setData(ClipboardData(text: jsonString));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied all config values to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// View Mode Switcher
+// ============================================================================
+
+class _ViewModeSwitcher extends StatelessWidget {
+  const _ViewModeSwitcher({
+    required this.currentMode,
+    required this.onModeChanged,
+  });
+
+  final ConfigViewMode currentMode;
+  final ValueChanged<ConfigViewMode> onModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      child: SegmentedButton<ConfigViewMode>(
+        segments: const [
+          ButtonSegment(
+            value: ConfigViewMode.list,
+            icon: Icon(Icons.view_list, size: 18),
+            label: Text('List'),
+          ),
+          ButtonSegment(
+            value: ConfigViewMode.table,
+            icon: Icon(Icons.table_chart, size: 18),
+            label: Text('Table'),
+          ),
+          ButtonSegment(
+            value: ConfigViewMode.json,
+            icon: Icon(Icons.data_object, size: 18),
+            label: Text('JSON'),
+          ),
+        ],
+        selected: {currentMode},
+        onSelectionChanged: (selected) => onModeChanged(selected.first),
+        showSelectedIcon: false,
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Empty State
+// ============================================================================
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.warning_amber, size: 64, color: Colors.orange),
+          SizedBox(height: 16),
+          Text(
+            'Remote Config is accessible\nbut contains no values',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// List View
+// ============================================================================
+
+class _ListView extends StatelessWidget {
+  const _ListView({
+    required this.sortedKeys,
+    required this.configValues,
+  });
+
+  final List<String> sortedKeys;
+  final Map<String, dynamic> configValues;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      itemCount: sortedKeys.length,
+      itemBuilder: (context, index) {
+        final key = sortedKeys[index];
+        final value = configValues[key];
+        return _ConfigCard(
+          configKey: key,
+          configValue: value,
+        );
+      },
+    );
+  }
+}
+
+// ============================================================================
+// Table View
+// ============================================================================
+
+class _TableView extends StatelessWidget {
+  const _TableView({
+    required this.sortedKeys,
+    required this.configValues,
+  });
+
+  final List<String> sortedKeys;
+  final Map<String, dynamic> configValues;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Card(
+          elevation: 0,
+          clipBehavior: Clip.antiAlias,
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            columnWidths: const {
+              0: FixedColumnWidth(200),
+              1: FixedColumnWidth(450),
+            },
+            border: TableBorder(
+              horizontalInside: BorderSide(color: Colors.grey.shade200),
+            ),
+            children: [
+              // Header row
+              TableRow(
+                decoration: BoxDecoration(color: Colors.grey.shade100),
+                children: const [
+                  _TableHeader('Key'),
+                  _TableHeader('Value'),
+                ],
+              ),
+              // Data rows
+              ...sortedKeys.map((key) {
+                final value = configValues[key];
+                return _buildTableRow(context, key, value);
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  TableRow _buildTableRow(BuildContext context, String key, dynamic value) {
+    final valueString = _formatValue(value);
+    final valueType = _getValueType(value);
+    final isLong = valueString.length > 50 || valueString.contains('\n');
+
+    return TableRow(
+      children: [
+        // Key
+        _TableCell(
+          child: Text(
+            key,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 13,
+              color: Colors.blue,
+            ),
+          ),
+          onTap: () => _copyToClipboard(context, key, 'Key'),
+        ),
+        // Value
+        _TableCell(
+          child: Text(
+            isLong
+                ? '${valueString.substring(0, 50.clamp(0, valueString.length))}...'
+                : valueString,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () => _showValueDialog(context, key, valueString, valueType),
+        ),
+      ],
+    );
+  }
+
+  void _copyToClipboard(BuildContext context, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label copied to clipboard'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _showValueDialog(
+    BuildContext context,
+    String key,
+    String value,
+    String type,
+  ) {
+    final accentColor = _getTypeColorStatic(type);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header matching list tile style
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accentColor.withOpacity(0.1)),
+                ),
+                child: Row(
+                  children: [
+                    // Type icon
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: accentColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        _getTypeIconStatic(type),
+                        size: 20,
+                        color: accentColor,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Key name
+                    Expanded(
+                      child: Text(
+                        key,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                    ),
+                    // Copy button
+                    Material(
+                      color: accentColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: value));
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 20,
+                            color: accentColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Value content
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F9FA),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: SelectableText(
+                      value,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        color: Colors.grey.shade800,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Color _getTypeColorStatic(String type) {
+    switch (type) {
+      case 'object':
+        return Colors.purple;
+      case 'array':
+        return Colors.indigo;
+      case 'bool':
+        return Colors.orange;
+      case 'int':
+      case 'double':
+        return Colors.green;
+      case 'string':
+        return Colors.blue;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  static IconData _getTypeIconStatic(String type) {
+    switch (type) {
+      case 'object':
+        return Icons.data_object;
+      case 'array':
+        return Icons.data_array;
+      case 'bool':
+        return Icons.toggle_on_outlined;
+      case 'int':
+      case 'double':
+        return Icons.numbers;
+      case 'string':
+        return Icons.text_fields;
+      default:
+        return Icons.code;
+    }
+  }
+
+  String _formatValue(dynamic value) {
+    if (value is Map || value is List) {
+      return const JsonEncoder.withIndent('  ').convert(value);
+    }
+    return value.toString();
+  }
+
+  String _getValueType(dynamic value) {
+    if (value is Map) return 'object';
+    if (value is List) return 'array';
+    if (value is bool) return 'bool';
+    if (value is int) return 'int';
+    if (value is double) return 'double';
+    if (value is String) {
+      if (value.toLowerCase() == 'true' || value.toLowerCase() == 'false') {
+        return 'bool';
+      }
+      if (int.tryParse(value) != null) return 'int';
+      if (double.tryParse(value) != null) return 'double';
+      return 'string';
+    }
+    return 'unknown';
+  }
+}
+
+class _TableHeader extends StatelessWidget {
+  const _TableHeader(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _TableCell extends StatelessWidget {
+  const _TableCell({required this.child, this.onTap});
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: child,
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// JSON View
+// ============================================================================
+
+class _JsonView extends StatelessWidget {
+  const _JsonView({required this.configValues});
+
+  final Map<String, dynamic> configValues;
+
+  String get _jsonString =>
+      const JsonEncoder.withIndent('  ').convert(configValues);
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SelectableText(
+              _jsonString,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                color: Color(0xFFD4D4D4),
+                height: 1.5,
+              ),
+            ),
+          ),
+        ),
+        // Copy FAB
+        Positioned(
+          right: 20,
+          bottom: 20,
+          child: FloatingActionButton.small(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: _jsonString));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('JSON copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            child: const Icon(Icons.copy),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// Config Card (for List View)
+// ============================================================================
+
+class _ConfigCard extends StatefulWidget {
+  const _ConfigCard({
+    required this.configKey,
+    required this.configValue,
+  });
+
+  final String configKey;
+  final dynamic configValue;
+
+  @override
+  State<_ConfigCard> createState() => _ConfigCardState();
+}
+
+class _ConfigCardState extends State<_ConfigCard> {
+  bool _isExpanded = false;
+
+  static const int _maxShortValueLength = 100;
+  static const int _maxShortValueLines = 3;
+
+  String get _valueString => _formatValue(widget.configValue);
+  String get _valueType => _getValueType(widget.configValue);
+
+  bool get _isLargeValue {
+    final valueStr = _valueString;
+    final lineCount = '\n'.allMatches(valueStr).length + 1;
+    return valueStr.length > _maxShortValueLength ||
+        lineCount > _maxShortValueLines;
+  }
+
+  String get _previewValue {
+    final valueStr = _valueString;
+    final lines = valueStr.split('\n');
+
+    if (lines.length > _maxShortValueLines) {
+      return '${lines.take(_maxShortValueLines).join('\n')}...';
+    }
+
+    if (valueStr.length > _maxShortValueLength) {
+      return '${valueStr.substring(0, _maxShortValueLength)}...';
+    }
+
+    return valueStr;
+  }
+
+  Color get _accentColor => _getTypeColor(_valueType);
+
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case 'object':
+        return Colors.purple;
+      case 'array':
+        return Colors.indigo;
+      case 'bool':
+        return Colors.orange;
+      case 'int':
+      case 'double':
+        return Colors.green;
+      case 'string':
+        return Colors.blue;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with colored accent
+          InkWell(
+            onTap: () => _copyValue(context),
+            onLongPress: () => _showFullValue(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _accentColor.withOpacity(0.05),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
+                border: Border(
+                  bottom: BorderSide(color: _accentColor.withOpacity(0.1)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  // Key icon
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: _accentColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      _getTypeIcon(_valueType),
+                      size: 14,
+                      color: _accentColor,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Key name
+                  Expanded(
+                    child: Text(
+                      widget.configKey,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Value section
+          if (_isLargeValue) _buildExpandableValue() else _buildSimpleValue(),
+        ],
+      ),
+    );
+  }
+
+  IconData _getTypeIcon(String type) {
+    switch (type) {
+      case 'object':
+        return Icons.data_object;
+      case 'array':
+        return Icons.data_array;
+      case 'bool':
+        return Icons.toggle_on_outlined;
+      case 'int':
+      case 'double':
+        return Icons.numbers;
+      case 'string':
+        return Icons.text_fields;
+      default:
+        return Icons.code;
+    }
+  }
+
+  Widget _buildSimpleValue() {
+    return InkWell(
+      onTap: () => _copyValue(context),
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8F9FA),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: SelectableText(
+            _valueString,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              color: Colors.grey.shade800,
+              height: 1.4,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandableValue() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Value content
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            constraints: BoxConstraints(maxHeight: _isExpanded ? 350 : 100),
+            child: SingleChildScrollView(
+              physics: _isExpanded
+                  ? const AlwaysScrollableScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              child: SelectableText(
+                _isExpanded ? _valueString : _previewValue,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: Colors.grey.shade800,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Expand/Collapse button
+        InkWell(
+          onTap: () => setState(() => _isExpanded = !_isExpanded),
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(12),
+          ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _accentColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isExpanded ? Icons.unfold_less : Icons.unfold_more,
+                        size: 16,
+                        color: _accentColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isExpanded ? 'Collapse' : 'Expand',
+                        style: TextStyle(
+                          color: _accentColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatValue(dynamic value) {
+    if (value is Map || value is List) {
+      return const JsonEncoder.withIndent('  ').convert(value);
+    }
+    return value.toString();
+  }
+
+  String _getValueType(dynamic value) {
+    if (value is Map) return 'object';
+    if (value is List) return 'array';
+    if (value is bool) return 'bool';
+    if (value is int) return 'int';
+    if (value is double) return 'double';
+    if (value is String) {
+      if (value.toLowerCase() == 'true' || value.toLowerCase() == 'false') {
+        return 'bool';
+      }
+      if (int.tryParse(value) != null) return 'int';
+      if (double.tryParse(value) != null) return 'double';
+      return 'string';
+    }
+    return 'unknown';
+  }
+
+  void _copyValue(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: _valueString));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Copied "${widget.configKey}" to clipboard'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _showFullValue(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header matching list tile style
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: _accentColor.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _accentColor.withOpacity(0.1)),
+                ),
+                child: Row(
+                  children: [
+                    // Type icon
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _accentColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        _getTypeIcon(_valueType),
+                        size: 20,
+                        color: _accentColor,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Key name
+                    Expanded(
+                      child: Text(
+                        widget.configKey,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          color: Colors.grey.shade800,
+                        ),
+                      ),
+                    ),
+                    // Copy button
+                    Material(
+                      color: _accentColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: _valueString));
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 20,
+                            color: _accentColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Value content
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F9FA),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: SelectableText(
+                      _valueString,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        color: Colors.grey.shade800,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
