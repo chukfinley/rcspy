@@ -30,10 +30,14 @@ RC Spy is a security tool that scans installed Android apps to detect backend mi
 - **Smart JWT Validation** — Validates JWT tokens to ensure they're actually Supabase keys (not Auth0, Firebase Auth, etc.)
 - **Key Format Support** — Detects both old JWT format (`eyJ...`) and new format (`sb_publishable_...`)
 - **Security Analysis** — Tests for exposed storage buckets and database tables
+- **Schema Discovery** — Automatically discovers tables via PostgREST OpenAPI schema
+- **Multiple Views** — View exposed data in List, Table, or raw JSON format (unified with Firebase UI)
 
 ### General
 - **Flutter App Support** — Scans native libraries (`.so` files) where Flutter stores compiled strings
 - **Smart Filtering** — Filter by All, Vulnerable, Firebase, Supabase, Secure, or No Backend
+- **Search** — Quick search to find apps by name
+- **Manual Scan Mode** — Start scanning when you're ready with the "Start Scan" button
 - **Local Caching** — Results persist across app launches
 - **Fast Scanning** — Parallel analysis using isolates for smooth performance
 - **Share Results** — Export and share analysis findings
