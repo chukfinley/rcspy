@@ -191,7 +191,8 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
     }
 
     final hasFirebase = foundAppIds.isNotEmpty || foundApiKeys.isNotEmpty;
-    final hasSupabase = foundSupabaseUrls.isNotEmpty && foundSupabaseKeys.isNotEmpty;
+    // Detect Supabase if URL OR key found (security check requires both)
+    final hasSupabase = foundSupabaseUrls.isNotEmpty || foundSupabaseKeys.isNotEmpty;
 
     return ApkAnalysisResult(
       firebase: FirebaseAnalysisResult(
@@ -216,6 +217,7 @@ bool _shouldAnalyzeFileStatic(String fileName) {
       fileName.endsWith('.json') ||
       fileName.endsWith('.dex') ||
       fileName.endsWith('.properties') ||
+      fileName.endsWith('.so') || // Flutter apps store strings in native libs
       fileName.contains('google-services') ||
       fileName.contains('firebase') ||
       fileName.contains('supabase') ||
