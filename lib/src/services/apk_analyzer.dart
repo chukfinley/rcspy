@@ -163,10 +163,14 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
       caseSensitive: false,
     );
 
-    // Supabase anon key pattern: JWT token starting with eyJ
-    // Format: eyJ<base64>.<base64>.<base64> (at least 100 chars total)
-    final supabaseKeyPattern = RegExp(
+    // Supabase anon/publishable key patterns:
+    // Old format (JWT): eyJ<base64>.<base64>.<base64>
+    // New format: sb_publishable_<key> or sb_secret_<key>
+    final supabaseKeyPatternJWT = RegExp(
       r'eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}',
+    );
+    final supabaseKeyPatternNew = RegExp(
+      r'sb_(publishable|secret)_[A-Za-z0-9_-]{20,}',
     );
 
     for (final archiveFile in archive) {
@@ -180,7 +184,8 @@ Future<Map<String, dynamic>> _analyzeApkInIsolate(String apkPath) async {
             googleAppIdPattern,
             googleApiKeyPattern,
             supabaseUrlPattern,
-            supabaseKeyPattern,
+            supabaseKeyPatternJWT,
+            supabaseKeyPatternNew,
           );
           foundAppIds.addAll(extractedData.firebaseAppIds);
           foundApiKeys.addAll(extractedData.firebaseApiKeys);
@@ -243,7 +248,8 @@ _ExtractedCredentials _extractAllCredentialsStatic(
   RegExp firebaseAppIdPattern,
   RegExp firebaseApiKeyPattern,
   RegExp supabaseUrlPattern,
-  RegExp supabaseKeyPattern,
+  RegExp supabaseKeyPatternJWT,
+  RegExp supabaseKeyPatternNew,
 ) {
   final Set<String> foundFirebaseAppIds = {};
   final Set<String> foundFirebaseApiKeys = {};
@@ -270,14 +276,19 @@ _ExtractedCredentials _extractAllCredentialsStatic(
       foundSupabaseUrls.add(match.group(0)!);
     }
 
-    final supabaseKeyMatches = supabaseKeyPattern.allMatches(stringContent);
-    for (final match in supabaseKeyMatches) {
+    // Old JWT format keys
+    final supabaseKeyMatchesJWT = supabaseKeyPatternJWT.allMatches(stringContent);
+    for (final match in supabaseKeyMatchesJWT) {
       final key = match.group(0)!;
-      // Filter out keys that are likely not Supabase anon keys
-      // Supabase keys typically have specific claims in the payload
-      if (_isLikelySupabaseKey(key)) {
+      if (_isLikelySupabaseKeyJWT(key)) {
         foundSupabaseKeys.add(key);
       }
+    }
+
+    // New sb_publishable/sb_secret format keys
+    final supabaseKeyMatchesNew = supabaseKeyPatternNew.allMatches(stringContent);
+    for (final match in supabaseKeyMatchesNew) {
+      foundSupabaseKeys.add(match.group(0)!);
     }
   } catch (e) {
     // Ignore extraction errors
@@ -291,7 +302,7 @@ _ExtractedCredentials _extractAllCredentialsStatic(
   );
 }
 
-bool _isLikelySupabaseKey(String jwt) {
+bool _isLikelySupabaseKeyJWT(String jwt) {
   try {
     final parts = jwt.split('.');
     if (parts.length != 3) return false;
