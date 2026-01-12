@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:rcspy/src/services/supabase_service.dart';
 import 'package:share_plus/share_plus.dart';
 
-enum SupabaseViewMode { overview, buckets, tables, storage }
+enum SupabaseViewMode { list, table, json }
 
 class SupabaseResultsPage extends StatefulWidget {
   const SupabaseResultsPage({
@@ -22,12 +22,101 @@ class SupabaseResultsPage extends StatefulWidget {
 }
 
 class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
-  SupabaseViewMode _viewMode = SupabaseViewMode.overview;
+  SupabaseViewMode _viewMode = SupabaseViewMode.list;
 
   int get _totalIssues =>
       widget.result.publicBuckets.length +
       widget.result.exposedTables.length +
       widget.result.exposedStorageObjects.length;
+
+  List<_FindingItem> get _findings {
+    final items = <_FindingItem>[];
+
+    // Add project URL as first item
+    if (widget.result.workingProjectUrl != null) {
+      items.add(_FindingItem(
+        type: _FindingType.info,
+        title: 'Project URL',
+        value: widget.result.workingProjectUrl!,
+        icon: Icons.link,
+        color: Colors.teal,
+      ));
+    }
+
+    // Add API key
+    if (widget.result.workingAnonKey != null) {
+      items.add(_FindingItem(
+        type: _FindingType.info,
+        title: 'Anon Key',
+        value: widget.result.workingAnonKey!,
+        icon: Icons.key,
+        color: Colors.indigo,
+      ));
+    }
+
+    // Add exposed tables
+    for (final table in widget.result.exposedTables) {
+      items.add(_FindingItem(
+        type: _FindingType.table,
+        title: table.tableName,
+        value: table.sampleData.isNotEmpty
+            ? const JsonEncoder.withIndent('  ').convert(table.sampleData)
+            : 'Columns: ${table.columns.join(', ')}',
+        icon: Icons.table_chart,
+        color: Colors.purple,
+        metadata: {
+          'columns': table.columns,
+          'rowCount': table.rowCount,
+          'sampleData': table.sampleData,
+        },
+      ));
+    }
+
+    // Add public buckets
+    for (final bucket in widget.result.publicBuckets) {
+      items.add(_FindingItem(
+        type: _FindingType.bucket,
+        title: bucket.name,
+        value: bucket.isPublic ? 'Public Access Enabled' : 'Private',
+        icon: Icons.folder_open,
+        color: Colors.orange,
+        metadata: {
+          'id': bucket.id,
+          'isPublic': bucket.isPublic,
+          'exposedFiles': bucket.exposedFiles,
+        },
+      ));
+    }
+
+    // Add exposed storage objects
+    for (final object in widget.result.exposedStorageObjects) {
+      items.add(_FindingItem(
+        type: _FindingType.file,
+        title: object.split('/').last,
+        value: object,
+        icon: Icons.insert_drive_file,
+        color: Colors.blue,
+      ));
+    }
+
+    return items;
+  }
+
+  Map<String, dynamic> get _jsonData => {
+        'projectUrl': widget.result.workingProjectUrl,
+        'anonKey': widget.result.workingAnonKey,
+        'isVulnerable': widget.result.isVulnerable,
+        'summary': {
+          'publicBuckets': widget.result.publicBuckets.length,
+          'exposedTables': widget.result.exposedTables.length,
+          'exposedStorageObjects': widget.result.exposedStorageObjects.length,
+        },
+        'publicBuckets':
+            widget.result.publicBuckets.map((b) => b.toMap()).toList(),
+        'exposedTables':
+            widget.result.exposedTables.map((t) => t.toMap()).toList(),
+        'exposedStorageObjects': widget.result.exposedStorageObjects,
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +134,7 @@ class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
               '$_totalIssues security issues found',
               style: TextStyle(
                 fontSize: 12,
-                color: Colors.red[400],
+                color: _totalIssues > 0 ? Colors.red[400] : Colors.green[400],
                 fontWeight: FontWeight.normal,
               ),
             ),
@@ -71,7 +160,6 @@ class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
                 _ViewModeSwitcher(
                   currentMode: _viewMode,
                   onModeChanged: (mode) => setState(() => _viewMode = mode),
-                  result: widget.result,
                 ),
                 Expanded(child: _buildContent()),
               ],
@@ -81,24 +169,17 @@ class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
 
   Widget _buildContent() {
     switch (_viewMode) {
-      case SupabaseViewMode.overview:
-        return _OverviewView(result: widget.result);
-      case SupabaseViewMode.buckets:
-        return _BucketsView(buckets: widget.result.publicBuckets);
-      case SupabaseViewMode.tables:
-        return _TablesView(tables: widget.result.exposedTables);
-      case SupabaseViewMode.storage:
-        return _StorageObjectsView(objects: widget.result.exposedStorageObjects);
+      case SupabaseViewMode.list:
+        return _ListView(findings: _findings);
+      case SupabaseViewMode.table:
+        return _TableView(findings: _findings);
+      case SupabaseViewMode.json:
+        return _JsonView(jsonData: _jsonData);
     }
   }
 
   void _copyAllAsJson(BuildContext context) {
-    final jsonString = const JsonEncoder.withIndent('  ').convert({
-      'projectUrl': widget.result.workingProjectUrl,
-      'publicBuckets': widget.result.publicBuckets.map((b) => b.toMap()).toList(),
-      'exposedTables': widget.result.exposedTables.map((t) => t.toMap()).toList(),
-      'exposedStorageObjects': widget.result.exposedStorageObjects,
-    });
+    final jsonString = const JsonEncoder.withIndent('  ').convert(_jsonData);
     Clipboard.setData(ClipboardData(text: jsonString));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -109,21 +190,19 @@ class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
   }
 
   void _shareForAnalysis(BuildContext context) {
-    final bucketNames = widget.result.publicBuckets.map((b) => b.name).join(', ');
-    final tableNames = widget.result.exposedTables.map((t) => t.tableName).join(', ');
+    final bucketNames =
+        widget.result.publicBuckets.map((b) => b.name).join(', ');
+    final tableNames =
+        widget.result.exposedTables.map((t) => t.tableName).join(', ');
 
-    final jsonString = const JsonEncoder.withIndent('  ').convert({
-      'projectUrl': widget.result.workingProjectUrl,
-      'publicBuckets': widget.result.publicBuckets.map((b) => b.toMap()).toList(),
-      'exposedTables': widget.result.exposedTables.map((t) => t.toMap()).toList(),
-      'exposedStorageObjects': widget.result.exposedStorageObjects,
-    });
+    final jsonString = const JsonEncoder.withIndent('  ').convert(_jsonData);
 
     final shareText = '''
 Supabase Security Analysis Report
 ==================================
 App: ${widget.appName}
 Project URL: ${widget.result.workingProjectUrl ?? 'Unknown'}
+Anon Key: ${widget.result.workingAnonKey ?? 'Unknown'}
 
 **Security Issues Found:**
 - Public Storage Buckets: ${widget.result.publicBuckets.length}${bucketNames.isNotEmpty ? ' ($bucketNames)' : ''}
@@ -149,116 +228,73 @@ Generated by RC Spy - Security Research Tool
   }
 }
 
+enum _FindingType { info, table, bucket, file }
+
+class _FindingItem {
+  final _FindingType type;
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final Map<String, dynamic>? metadata;
+
+  _FindingItem({
+    required this.type,
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.metadata,
+  });
+
+  String get typeLabel {
+    switch (type) {
+      case _FindingType.info:
+        return 'INFO';
+      case _FindingType.table:
+        return 'TABLE';
+      case _FindingType.bucket:
+        return 'BUCKET';
+      case _FindingType.file:
+        return 'FILE';
+    }
+  }
+}
+
 class _ViewModeSwitcher extends StatelessWidget {
   const _ViewModeSwitcher({
     required this.currentMode,
     required this.onModeChanged,
-    required this.result,
   });
 
   final SupabaseViewMode currentMode;
   final ValueChanged<SupabaseViewMode> onModeChanged;
-  final SupabaseSecurityResult result;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            _buildSegment(
-              SupabaseViewMode.overview,
-              Icons.dashboard,
-              'Overview',
-              null,
-            ),
-            const SizedBox(width: 8),
-            _buildSegment(
-              SupabaseViewMode.buckets,
-              Icons.folder_open,
-              'Buckets',
-              result.publicBuckets.length,
-            ),
-            const SizedBox(width: 8),
-            _buildSegment(
-              SupabaseViewMode.tables,
-              Icons.table_chart,
-              'Tables',
-              result.exposedTables.length,
-            ),
-            const SizedBox(width: 8),
-            _buildSegment(
-              SupabaseViewMode.storage,
-              Icons.insert_drive_file,
-              'Files',
-              result.exposedStorageObjects.length,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSegment(
-    SupabaseViewMode mode,
-    IconData icon,
-    String label,
-    int? count,
-  ) {
-    final isSelected = currentMode == mode;
-    final color = isSelected ? Colors.teal : Colors.grey;
-
-    return Material(
-      color: isSelected ? Colors.teal.withOpacity(0.1) : Colors.grey[100],
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: () => onModeChanged(mode),
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected ? Colors.teal : Colors.grey[300]!,
-              width: isSelected ? 1.5 : 1,
-            ),
+      child: SegmentedButton<SupabaseViewMode>(
+        segments: const [
+          ButtonSegment(
+            value: SupabaseViewMode.list,
+            icon: Icon(Icons.view_list, size: 18),
+            label: Text('List'),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected ? Colors.teal : Colors.grey[700],
-                ),
-              ),
-              if (count != null && count > 0) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    '$count',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
-                    ),
-                  ),
-                ),
-              ],
-            ],
+          ButtonSegment(
+            value: SupabaseViewMode.table,
+            icon: Icon(Icons.table_chart, size: 18),
+            label: Text('Table'),
           ),
-        ),
+          ButtonSegment(
+            value: SupabaseViewMode.json,
+            icon: Icon(Icons.data_object, size: 18),
+            label: Text('JSON'),
+          ),
+        ],
+        selected: {currentMode},
+        onSelectionChanged: (selected) => onModeChanged(selected.first),
+        showSelectedIcon: false,
       ),
     );
   }
@@ -286,568 +322,744 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _OverviewView extends StatelessWidget {
-  const _OverviewView({required this.result});
+class _ListView extends StatelessWidget {
+  const _ListView({required this.findings});
 
-  final SupabaseSecurityResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Project URL
-        if (result.workingProjectUrl != null) ...[
-          _SectionHeader(
-            icon: Icons.link,
-            title: 'Supabase Project URL',
-            color: Colors.teal,
-          ),
-          _InfoCard(
-            content: result.workingProjectUrl!,
-            color: Colors.teal,
-          ),
-          const SizedBox(height: 24),
-        ],
-
-        // Summary
-        _SectionHeader(
-          icon: Icons.warning_amber,
-          title: 'Security Issues Summary',
-          color: Colors.red,
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.folder_open,
-                label: 'Public Buckets',
-                count: result.publicBuckets.length,
-                color: Colors.orange,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                icon: Icons.table_chart,
-                label: 'Exposed Tables',
-                count: result.exposedTables.length,
-                color: Colors.purple,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.insert_drive_file,
-                label: 'Exposed Files',
-                count: result.exposedStorageObjects.length,
-                color: Colors.blue,
-              ),
-            ),
-            const Expanded(child: SizedBox()),
-          ],
-        ),
-        const SizedBox(height: 24),
-
-        // Public Buckets Preview
-        if (result.publicBuckets.isNotEmpty) ...[
-          _SectionHeader(
-            icon: Icons.folder_open,
-            title: 'Public Storage Buckets',
-            color: Colors.orange,
-          ),
-          const SizedBox(height: 8),
-          ...result.publicBuckets.take(3).map(
-                (bucket) => _BucketTile(bucket: bucket),
-              ),
-          if (result.publicBuckets.length > 3)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '+ ${result.publicBuckets.length - 3} more buckets',
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
-              ),
-            ),
-          const SizedBox(height: 24),
-        ],
-
-        // Exposed Tables Preview
-        if (result.exposedTables.isNotEmpty) ...[
-          _SectionHeader(
-            icon: Icons.table_chart,
-            title: 'Exposed Database Tables',
-            color: Colors.purple,
-          ),
-          const SizedBox(height: 8),
-          ...result.exposedTables.take(3).map(
-                (table) => _TableTile(table: table),
-              ),
-          if (result.exposedTables.length > 3)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                '+ ${result.exposedTables.length - 3} more tables',
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
-              ),
-            ),
-        ],
-      ],
-    );
-  }
-}
-
-class _BucketsView extends StatelessWidget {
-  const _BucketsView({required this.buckets});
-
-  final List<StorageBucketInfo> buckets;
+  final List<_FindingItem> findings;
 
   @override
   Widget build(BuildContext context) {
-    if (buckets.isEmpty) {
-      return const Center(
-        child: Text('No public buckets found'),
-      );
-    }
-
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: buckets.length,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      itemCount: findings.length,
       itemBuilder: (context, index) {
-        return _BucketTile(bucket: buckets[index]);
+        final finding = findings[index];
+        return _FindingCard(finding: finding);
       },
     );
   }
 }
 
-class _TablesView extends StatelessWidget {
-  const _TablesView({required this.tables});
+class _TableView extends StatelessWidget {
+  const _TableView({required this.findings});
 
-  final List<ExposedTableInfo> tables;
-
-  @override
-  Widget build(BuildContext context) {
-    if (tables.isEmpty) {
-      return const Center(
-        child: Text('No exposed tables found'),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: tables.length,
-      itemBuilder: (context, index) {
-        return _TableTile(table: tables[index], showDetails: true);
-      },
-    );
-  }
-}
-
-class _StorageObjectsView extends StatelessWidget {
-  const _StorageObjectsView({required this.objects});
-
-  final List<String> objects;
+  final List<_FindingItem> findings;
 
   @override
   Widget build(BuildContext context) {
-    if (objects.isEmpty) {
-      return const Center(
-        child: Text('No exposed storage objects found'),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: objects.length,
-      itemBuilder: (context, index) {
-        final object = objects[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue.withOpacity(0.2)),
-          ),
-          child: ListTile(
-            leading: Icon(Icons.insert_drive_file, color: Colors.blue[700]),
-            title: SelectableText(
-              object,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-              ),
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.copy, size: 20),
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: object));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Copied to clipboard'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.icon,
-    required this.title,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String title;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 20, color: color),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey[800],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _InfoCard extends StatelessWidget {
-  const _InfoCard({
-    required this.content,
-    required this.color,
-  });
-
-  final String content;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: SelectableText(
-              content,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 14,
-                color: color,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.copy, color: color),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: content));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Copied to clipboard'),
-                  duration: Duration(seconds: 1),
-                ),
-              );
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Card(
+          elevation: 0,
+          clipBehavior: Clip.antiAlias,
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            columnWidths: const {
+              0: FixedColumnWidth(80),
+              1: FixedColumnWidth(150),
+              2: FixedColumnWidth(400),
             },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final int count;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: count > 0 ? color.withOpacity(0.1) : Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: count > 0 ? color.withOpacity(0.3) : Colors.grey[300]!,
-        ),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            icon,
-            size: 32,
-            color: count > 0 ? color : Colors.grey,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '$count',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: count > 0 ? color : Colors.grey,
+            border: TableBorder(
+              horizontalInside: BorderSide(color: Colors.grey.shade200),
             ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BucketTile extends StatelessWidget {
-  const _BucketTile({required this.bucket});
-
-  final StorageBucketInfo bucket;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withOpacity(0.2)),
-      ),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.orange.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Icon(Icons.folder_open, color: Colors.orange),
-        ),
-        title: Text(
-          bucket.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          bucket.isPublic ? 'Public Access Enabled' : 'Private',
-          style: TextStyle(
-            color: bucket.isPublic ? Colors.red : Colors.green,
-            fontSize: 12,
-          ),
-        ),
-        trailing: bucket.isPublic
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'PUBLIC',
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              )
-            : null,
-      ),
-    );
-  }
-}
-
-class _TableTile extends StatelessWidget {
-  const _TableTile({required this.table, this.showDetails = false});
-
-  final ExposedTableInfo table;
-  final bool showDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.purple.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.purple.withOpacity(0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.table_chart, color: Colors.purple),
-            ),
-            title: Text(
-              table.tableName,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: Text(
-              '${table.columns.length} columns${table.rowCount != null ? ' - ${table.rowCount} sample rows' : ''}',
-              style: const TextStyle(fontSize: 12),
-            ),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'EXPOSED',
-                style: TextStyle(
-                  color: Colors.red,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          if (showDetails && table.columns.isNotEmpty) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Columns:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: table.columns
-                        .map(
-                          (col) => Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              col,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: 11,
-                              ),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
+            children: [
+              TableRow(
+                decoration: BoxDecoration(color: Colors.grey.shade100),
+                children: const [
+                  _TableHeader('Type'),
+                  _TableHeader('Name'),
+                  _TableHeader('Details'),
                 ],
               ),
+              ...findings.map((finding) => _buildTableRow(context, finding)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  TableRow _buildTableRow(BuildContext context, _FindingItem finding) {
+    final isLong = finding.value.length > 50 || finding.value.contains('\n');
+
+    return TableRow(
+      children: [
+        _TableCell(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: finding.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(4),
             ),
-          ],
-          if (showDetails && table.sampleData.isNotEmpty) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Sample Data:',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
+            child: Text(
+              finding.typeLabel,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: finding.color,
+              ),
+            ),
+          ),
+        ),
+        _TableCell(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(finding.icon, size: 16, color: finding.color),
+              const SizedBox(width: 8),
+              Text(
+                finding.title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: finding.color,
+                ),
+              ),
+            ],
+          ),
+          onTap: () => _copyToClipboard(context, finding.title, 'Name'),
+        ),
+        _TableCell(
+          child: Text(
+            isLong
+                ? '${finding.value.substring(0, 50.clamp(0, finding.value.length))}...'
+                : finding.value,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () => _showValueDialog(context, finding),
+        ),
+      ],
+    );
+  }
+
+  void _copyToClipboard(BuildContext context, String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label copied to clipboard'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _showValueDialog(BuildContext context, _FindingItem finding) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: finding.color.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: finding.color.withOpacity(0.1)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: finding.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.copy, size: 14),
-                        label: const Text('Copy JSON'),
-                        onPressed: () {
-                          final json = const JsonEncoder.withIndent('  ')
-                              .convert(table.sampleData);
-                          Clipboard.setData(ClipboardData(text: json));
+                      child: Icon(
+                        finding.icon,
+                        size: 20,
+                        color: finding.color,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            finding.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                              color: Colors.grey.shade800,
+                            ),
+                          ),
+                          Text(
+                            finding.typeLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: finding.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Material(
+                      color: finding.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: finding.value));
+                          Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Sample data copied'),
+                              content: Text('Copied to clipboard'),
                               duration: Duration(seconds: 1),
                             ),
                           );
                         },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 20,
+                            color: finding.color,
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(8),
+                      color: const Color(0xFFF8F9FA),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
                     ),
                     child: SelectableText(
-                      const JsonEncoder.withIndent('  ')
-                          .convert(table.sampleData.first),
-                      style: const TextStyle(
+                      finding.value,
+                      style: TextStyle(
                         fontFamily: 'monospace',
-                        fontSize: 11,
-                        color: Color(0xFFD4D4D4),
+                        fontSize: 13,
+                        color: Colors.grey.shade800,
+                        height: 1.5,
                       ),
                     ),
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TableHeader extends StatelessWidget {
+  const _TableHeader(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _TableCell extends StatelessWidget {
+  const _TableCell({required this.child, this.onTap});
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _JsonView extends StatelessWidget {
+  const _JsonView({required this.jsonData});
+
+  final Map<String, dynamic> jsonData;
+
+  String get _jsonString => const JsonEncoder.withIndent('  ').convert(jsonData);
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: SelectableText(
+              _jsonString,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                color: Color(0xFFD4D4D4),
+                height: 1.5,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 20,
+          bottom: 20,
+          child: FloatingActionButton.small(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: _jsonString));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('JSON copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            child: const Icon(Icons.copy),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FindingCard extends StatefulWidget {
+  const _FindingCard({required this.finding});
+
+  final _FindingItem finding;
+
+  @override
+  State<_FindingCard> createState() => _FindingCardState();
+}
+
+class _FindingCardState extends State<_FindingCard> {
+  bool _isExpanded = false;
+
+  static const int _maxShortValueLength = 100;
+  static const int _maxShortValueLines = 3;
+
+  bool get _isLargeValue {
+    final valueStr = widget.finding.value;
+    final lineCount = '\n'.allMatches(valueStr).length + 1;
+    return valueStr.length > _maxShortValueLength ||
+        lineCount > _maxShortValueLines;
+  }
+
+  String get _previewValue {
+    final valueStr = widget.finding.value;
+    final lines = valueStr.split('\n');
+
+    if (lines.length > _maxShortValueLines) {
+      return '${lines.take(_maxShortValueLines).join('\n')}...';
+    }
+
+    if (valueStr.length > _maxShortValueLength) {
+      return '${valueStr.substring(0, _maxShortValueLength)}...';
+    }
+
+    return valueStr;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final finding = widget.finding;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => _copyValue(context),
+            onLongPress: () => _showFullValue(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: finding.color.withOpacity(0.05),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
+                border: Border(
+                  bottom: BorderSide(color: finding.color.withOpacity(0.1)),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: finding.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Icon(
+                      finding.icon,
+                      size: 14,
+                      color: finding.color,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          finding.title,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          finding.typeLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: finding.color,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (finding.type != _FindingType.info)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'EXPOSED',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
-          ],
+          ),
+          if (_isLargeValue) _buildExpandableValue() else _buildSimpleValue(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSimpleValue() {
+    return InkWell(
+      onTap: () => _copyValue(context),
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8F9FA),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: SelectableText(
+            widget.finding.value,
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              color: Colors.grey.shade800,
+              height: 1.4,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandableValue() {
+    final finding = widget.finding;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            constraints: BoxConstraints(maxHeight: _isExpanded ? 350 : 100),
+            child: SingleChildScrollView(
+              physics: _isExpanded
+                  ? const AlwaysScrollableScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              child: SelectableText(
+                _isExpanded ? finding.value : _previewValue,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  color: Colors.grey.shade800,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () => setState(() => _isExpanded = !_isExpanded),
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(12),
+          ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: finding.color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isExpanded ? Icons.unfold_less : Icons.unfold_more,
+                        size: 16,
+                        color: finding.color,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isExpanded ? 'Collapse' : 'Expand',
+                        style: TextStyle(
+                          color: finding.color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _copyValue(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: widget.finding.value));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Copied "${widget.finding.title}" to clipboard'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  void _showFullValue(BuildContext context) {
+    final finding = widget.finding;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: finding.color.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: finding.color.withOpacity(0.1)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: finding.color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        finding.icon,
+                        size: 20,
+                        color: finding.color,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            finding.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                              color: Colors.grey.shade800,
+                            ),
+                          ),
+                          Text(
+                            finding.typeLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: finding.color,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Material(
+                      color: finding.color.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: finding.value));
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Copied to clipboard'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            Icons.copy_rounded,
+                            size: 20,
+                            color: finding.color,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F9FA),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: SelectableText(
+                      finding.value,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        color: Colors.grey.shade800,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
