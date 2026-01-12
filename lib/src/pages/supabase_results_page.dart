@@ -1,0 +1,854 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:rcspy/src/services/supabase_service.dart';
+import 'package:share_plus/share_plus.dart';
+
+enum SupabaseViewMode { overview, buckets, tables, storage }
+
+class SupabaseResultsPage extends StatefulWidget {
+  const SupabaseResultsPage({
+    super.key,
+    required this.appName,
+    required this.result,
+  });
+
+  final String appName;
+  final SupabaseSecurityResult result;
+
+  @override
+  State<SupabaseResultsPage> createState() => _SupabaseResultsPageState();
+}
+
+class _SupabaseResultsPageState extends State<SupabaseResultsPage> {
+  SupabaseViewMode _viewMode = SupabaseViewMode.overview;
+
+  int get _totalIssues =>
+      widget.result.publicBuckets.length +
+      widget.result.exposedTables.length +
+      widget.result.exposedStorageObjects.length;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.appName,
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              '$_totalIssues security issues found',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.red[400],
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            tooltip: 'Share for analysis',
+            onPressed: () => _shareForAnalysis(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy_all),
+            tooltip: 'Copy all as JSON',
+            onPressed: () => _copyAllAsJson(context),
+          ),
+        ],
+      ),
+      body: _totalIssues == 0
+          ? const _EmptyState()
+          : Column(
+              children: [
+                _ViewModeSwitcher(
+                  currentMode: _viewMode,
+                  onModeChanged: (mode) => setState(() => _viewMode = mode),
+                  result: widget.result,
+                ),
+                Expanded(child: _buildContent()),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildContent() {
+    switch (_viewMode) {
+      case SupabaseViewMode.overview:
+        return _OverviewView(result: widget.result);
+      case SupabaseViewMode.buckets:
+        return _BucketsView(buckets: widget.result.publicBuckets);
+      case SupabaseViewMode.tables:
+        return _TablesView(tables: widget.result.exposedTables);
+      case SupabaseViewMode.storage:
+        return _StorageObjectsView(objects: widget.result.exposedStorageObjects);
+    }
+  }
+
+  void _copyAllAsJson(BuildContext context) {
+    final jsonString = const JsonEncoder.withIndent('  ').convert({
+      'projectUrl': widget.result.workingProjectUrl,
+      'publicBuckets': widget.result.publicBuckets.map((b) => b.toMap()).toList(),
+      'exposedTables': widget.result.exposedTables.map((t) => t.toMap()).toList(),
+      'exposedStorageObjects': widget.result.exposedStorageObjects,
+    });
+    Clipboard.setData(ClipboardData(text: jsonString));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Copied all results to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _shareForAnalysis(BuildContext context) {
+    final bucketNames = widget.result.publicBuckets.map((b) => b.name).join(', ');
+    final tableNames = widget.result.exposedTables.map((t) => t.tableName).join(', ');
+
+    final jsonString = const JsonEncoder.withIndent('  ').convert({
+      'projectUrl': widget.result.workingProjectUrl,
+      'publicBuckets': widget.result.publicBuckets.map((b) => b.toMap()).toList(),
+      'exposedTables': widget.result.exposedTables.map((t) => t.toMap()).toList(),
+      'exposedStorageObjects': widget.result.exposedStorageObjects,
+    });
+
+    final shareText = '''
+Supabase Security Analysis Report
+==================================
+App: ${widget.appName}
+Project URL: ${widget.result.workingProjectUrl ?? 'Unknown'}
+
+**Security Issues Found:**
+- Public Storage Buckets: ${widget.result.publicBuckets.length}${bucketNames.isNotEmpty ? ' ($bucketNames)' : ''}
+- Exposed Database Tables: ${widget.result.exposedTables.length}${tableNames.isNotEmpty ? ' ($tableNames)' : ''}
+- Exposed Storage Files: ${widget.result.exposedStorageObjects.length}
+
+**Full Details:**
+$jsonString
+
+**Analysis Request:**
+Please analyze these Supabase security findings and identify:
+1. What sensitive data might be exposed through these misconfigurations
+2. Potential attack vectors using the exposed endpoints
+3. Security risks from public storage buckets and database tables
+4. Row Level Security (RLS) recommendations
+5. Steps the developer should take to secure this backend
+
+---
+Generated by RC Spy - Security Research Tool
+''';
+
+    Share.share(shareText, subject: 'RC Spy: ${widget.appName} Supabase Analysis');
+  }
+}
+
+class _ViewModeSwitcher extends StatelessWidget {
+  const _ViewModeSwitcher({
+    required this.currentMode,
+    required this.onModeChanged,
+    required this.result,
+  });
+
+  final SupabaseViewMode currentMode;
+  final ValueChanged<SupabaseViewMode> onModeChanged;
+  final SupabaseSecurityResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _buildSegment(
+              SupabaseViewMode.overview,
+              Icons.dashboard,
+              'Overview',
+              null,
+            ),
+            const SizedBox(width: 8),
+            _buildSegment(
+              SupabaseViewMode.buckets,
+              Icons.folder_open,
+              'Buckets',
+              result.publicBuckets.length,
+            ),
+            const SizedBox(width: 8),
+            _buildSegment(
+              SupabaseViewMode.tables,
+              Icons.table_chart,
+              'Tables',
+              result.exposedTables.length,
+            ),
+            const SizedBox(width: 8),
+            _buildSegment(
+              SupabaseViewMode.storage,
+              Icons.insert_drive_file,
+              'Files',
+              result.exposedStorageObjects.length,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSegment(
+    SupabaseViewMode mode,
+    IconData icon,
+    String label,
+    int? count,
+  ) {
+    final isSelected = currentMode == mode;
+    final color = isSelected ? Colors.teal : Colors.grey;
+
+    return Material(
+      color: isSelected ? Colors.teal.withOpacity(0.1) : Colors.grey[100],
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: () => onModeChanged(mode),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isSelected ? Colors.teal : Colors.grey[300]!,
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? Colors.teal : Colors.grey[700],
+                ),
+              ),
+              if (count != null && count > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.check_circle, size: 64, color: Colors.green),
+          SizedBox(height: 16),
+          Text(
+            'No vulnerabilities detected\nin Supabase configuration',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 16, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OverviewView extends StatelessWidget {
+  const _OverviewView({required this.result});
+
+  final SupabaseSecurityResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Project URL
+        if (result.workingProjectUrl != null) ...[
+          _SectionHeader(
+            icon: Icons.link,
+            title: 'Supabase Project URL',
+            color: Colors.teal,
+          ),
+          _InfoCard(
+            content: result.workingProjectUrl!,
+            color: Colors.teal,
+          ),
+          const SizedBox(height: 24),
+        ],
+
+        // Summary
+        _SectionHeader(
+          icon: Icons.warning_amber,
+          title: 'Security Issues Summary',
+          color: Colors.red,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: Icons.folder_open,
+                label: 'Public Buckets',
+                count: result.publicBuckets.length,
+                color: Colors.orange,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.table_chart,
+                label: 'Exposed Tables',
+                count: result.exposedTables.length,
+                color: Colors.purple,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: Icons.insert_drive_file,
+                label: 'Exposed Files',
+                count: result.exposedStorageObjects.length,
+                color: Colors.blue,
+              ),
+            ),
+            const Expanded(child: SizedBox()),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // Public Buckets Preview
+        if (result.publicBuckets.isNotEmpty) ...[
+          _SectionHeader(
+            icon: Icons.folder_open,
+            title: 'Public Storage Buckets',
+            color: Colors.orange,
+          ),
+          const SizedBox(height: 8),
+          ...result.publicBuckets.take(3).map(
+                (bucket) => _BucketTile(bucket: bucket),
+              ),
+          if (result.publicBuckets.length > 3)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '+ ${result.publicBuckets.length - 3} more buckets',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+            ),
+          const SizedBox(height: 24),
+        ],
+
+        // Exposed Tables Preview
+        if (result.exposedTables.isNotEmpty) ...[
+          _SectionHeader(
+            icon: Icons.table_chart,
+            title: 'Exposed Database Tables',
+            color: Colors.purple,
+          ),
+          const SizedBox(height: 8),
+          ...result.exposedTables.take(3).map(
+                (table) => _TableTile(table: table),
+              ),
+          if (result.exposedTables.length > 3)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '+ ${result.exposedTables.length - 3} more tables',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _BucketsView extends StatelessWidget {
+  const _BucketsView({required this.buckets});
+
+  final List<StorageBucketInfo> buckets;
+
+  @override
+  Widget build(BuildContext context) {
+    if (buckets.isEmpty) {
+      return const Center(
+        child: Text('No public buckets found'),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: buckets.length,
+      itemBuilder: (context, index) {
+        return _BucketTile(bucket: buckets[index]);
+      },
+    );
+  }
+}
+
+class _TablesView extends StatelessWidget {
+  const _TablesView({required this.tables});
+
+  final List<ExposedTableInfo> tables;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tables.isEmpty) {
+      return const Center(
+        child: Text('No exposed tables found'),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: tables.length,
+      itemBuilder: (context, index) {
+        return _TableTile(table: tables[index], showDetails: true);
+      },
+    );
+  }
+}
+
+class _StorageObjectsView extends StatelessWidget {
+  const _StorageObjectsView({required this.objects});
+
+  final List<String> objects;
+
+  @override
+  Widget build(BuildContext context) {
+    if (objects.isEmpty) {
+      return const Center(
+        child: Text('No exposed storage objects found'),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: objects.length,
+      itemBuilder: (context, index) {
+        final object = objects[index];
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            color: Colors.blue.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.withOpacity(0.2)),
+          ),
+          child: ListTile(
+            leading: Icon(Icons.insert_drive_file, color: Colors.blue[700]),
+            title: SelectableText(
+              object,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: object));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Copied to clipboard'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.icon,
+    required this.title,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String title;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 20, color: color),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey[800],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    required this.content,
+    required this.color,
+  });
+
+  final String content;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SelectableText(
+              content,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 14,
+                color: color,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.copy, color: color),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: content));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: count > 0 ? color.withOpacity(0.1) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: count > 0 ? color.withOpacity(0.3) : Colors.grey[300]!,
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 32,
+            color: count > 0 ? color : Colors.grey,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: count > 0 ? color : Colors.grey,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BucketTile extends StatelessWidget {
+  const _BucketTile({required this.bucket});
+
+  final StorageBucketInfo bucket;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange.withOpacity(0.2)),
+      ),
+      child: ListTile(
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.orange.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(Icons.folder_open, color: Colors.orange),
+        ),
+        title: Text(
+          bucket.name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          bucket.isPublic ? 'Public Access Enabled' : 'Private',
+          style: TextStyle(
+            color: bucket.isPublic ? Colors.red : Colors.green,
+            fontSize: 12,
+          ),
+        ),
+        trailing: bucket.isPublic
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'PUBLIC',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+class _TableTile extends StatelessWidget {
+  const _TableTile({required this.table, this.showDetails = false});
+
+  final ExposedTableInfo table;
+  final bool showDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.purple.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.purple.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.purple.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.table_chart, color: Colors.purple),
+            ),
+            title: Text(
+              table.tableName,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(
+              '${table.columns.length} columns${table.rowCount != null ? ' - ${table.rowCount} sample rows' : ''}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'EXPOSED',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          if (showDetails && table.columns.isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Columns:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: table.columns
+                        .map(
+                          (col) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              col,
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (showDetails && table.sampleData.isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Sample Data:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.copy, size: 14),
+                        label: const Text('Copy JSON'),
+                        onPressed: () {
+                          final json = const JsonEncoder.withIndent('  ')
+                              .convert(table.sampleData);
+                          Clipboard.setData(ClipboardData(text: json));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Sample data copied'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E1E),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      const JsonEncoder.withIndent('  ')
+                          .convert(table.sampleData.first),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: Color(0xFFD4D4D4),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}

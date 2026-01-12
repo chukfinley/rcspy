@@ -218,8 +218,21 @@ class _FilterBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _FilterChip(
+                label: 'Supabase',
+                count: data.progress.withSupabase,
+                icon: Icons.storage,
+                color: Colors.teal,
+                isSelected: data.filter == AppFilter.supabase,
+                onTap: () => context
+                    .read<AnalysisProvider>()
+                    .setFilter(AppFilter.supabase),
+              ),
+              const SizedBox(width: 8),
+              _FilterChip(
                 label: 'Secure',
-                count: data.progress.withFirebase - data.progress.vulnerable,
+                count: data.progress.withFirebase +
+                    data.progress.withSupabase -
+                    data.progress.vulnerable,
                 icon: Icons.lock,
                 color: Colors.green,
                 isSelected: data.filter == AppFilter.secure,
@@ -228,14 +241,16 @@ class _FilterBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _FilterChip(
-                label: 'No Firebase',
-                count: data.progress.total - data.progress.withFirebase,
+                label: 'No Backend',
+                count: data.progress.total -
+                    data.progress.withFirebase -
+                    data.progress.withSupabase,
                 icon: Icons.check_circle_outline,
                 color: Colors.grey,
-                isSelected: data.filter == AppFilter.noFirebase,
+                isSelected: data.filter == AppFilter.noBackend,
                 onTap: () => context
                     .read<AnalysisProvider>()
-                    .setFilter(AppFilter.noFirebase),
+                    .setFilter(AppFilter.noBackend),
               ),
             ],
           ),
