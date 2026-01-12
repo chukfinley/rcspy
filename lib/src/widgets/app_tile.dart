@@ -566,7 +566,7 @@ class AppTile extends StatelessWidget {
 
               if (supabaseResult.projectUrls.isNotEmpty) ...[
                 const Text(
-                  'Supabase Project URLs:',
+                  '🌐 Supabase Project URLs:',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const SizedBox(height: 8),
@@ -595,7 +595,7 @@ class AppTile extends StatelessWidget {
 
               if (supabaseResult.anonKeys.isNotEmpty) ...[
                 const Text(
-                  'Supabase Anon Keys (JWT):',
+                  '🔑 Supabase Keys:',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const SizedBox(height: 8),

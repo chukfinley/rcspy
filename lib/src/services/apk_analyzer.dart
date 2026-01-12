@@ -316,11 +316,53 @@ bool _isLikelySupabaseKeyJWT(String jwt) {
     // Replace URL-safe characters
     payload = payload.replaceAll('-', '+').replaceAll('_', '/');
 
-    // Check if it's valid base64 and contains expected fields
-    // Supabase anon keys typically have 'role' field set to 'anon'
-    return payload.length > 20;
+    // Decode base64 and check for Supabase-specific fields
+    final decodedBytes = _base64Decode(payload);
+    if (decodedBytes == null) return false;
+
+    final decodedStr = String.fromCharCodes(decodedBytes);
+
+    // Check for Supabase-specific indicators in the JWT payload:
+    // - "iss" containing "supabase"
+    // - "role" field (anon, authenticated, service_role)
+    // - "ref" field (project reference)
+    final isSupabase = decodedStr.contains('"iss"') &&
+        (decodedStr.contains('supabase') ||
+         decodedStr.contains('"role":"anon"') ||
+         decodedStr.contains('"role":"service_role"') ||
+         decodedStr.contains('"role":"authenticated"'));
+
+    return isSupabase;
   } catch (e) {
     return false;
+  }
+}
+
+List<int>? _base64Decode(String input) {
+  try {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    final bytes = <int>[];
+    int buffer = 0;
+    int bitsCollected = 0;
+
+    for (int i = 0; i < input.length; i++) {
+      final char = input[i];
+      if (char == '=') break;
+      final value = chars.indexOf(char);
+      if (value == -1) continue;
+
+      buffer = (buffer << 6) | value;
+      bitsCollected += 6;
+
+      if (bitsCollected >= 8) {
+        bitsCollected -= 8;
+        bytes.add((buffer >> bitsCollected) & 0xFF);
+      }
+    }
+
+    return bytes;
+  } catch (e) {
+    return null;
   }
 }
 
