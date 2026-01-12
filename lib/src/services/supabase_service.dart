@@ -177,26 +177,79 @@ class SupabaseSecurityResult {
 
 class SupabaseService {
   static const List<String> _commonTableNames = [
+    // User/Auth related
     'users',
     'profiles',
+    'accounts',
+    'customers',
+    'members',
+    'admins',
+    'user_profiles',
+    'user_data',
+    'users_exposed',
+    // Content
     'posts',
     'comments',
     'messages',
+    'articles',
+    'content',
+    'media',
+    // E-commerce
     'orders',
     'products',
     'items',
+    'cart',
+    'payments',
+    'transactions',
+    'invoices',
+    // Files/Documents
     'documents',
     'files',
+    'uploads',
+    'attachments',
+    'images',
+    'backups',
+    // Config/Settings
     'settings',
     'config',
+    'app_config',
+    'configurations',
+    'preferences',
+    'options',
+    // Data/Logs
     'data',
     'logs',
     'events',
+    'analytics',
+    'metrics',
+    'audit_logs',
+    // Notifications
     'notifications',
+    'alerts',
+    'emails',
+    // Sessions/Auth
     'sessions',
     'tokens',
-    'accounts',
-    'customers',
+    'api_keys',
+    'credentials',
+    'auth_tokens',
+    // Security-sensitive (test for vulnerabilities)
+    'secrets',
+    'test_secrets',
+    'keys',
+    'passwords',
+    'private',
+    'sensitive',
+    'internal',
+    // Generic
+    'records',
+    'entries',
+    'info',
+    'metadata',
+    'public',
+    'test',
+    'demo',
+    'sample',
   ];
 
   static Future<SupabaseSecurityResult> checkSecurity({
@@ -322,9 +375,22 @@ class SupabaseService {
     Map<String, String> headers,
   ) async {
     final exposedTables = <ExposedTableInfo>[];
+    final checkedTables = <String>{};
 
-    // Try common table names
-    for (final tableName in _commonTableNames) {
+    // First, try to discover tables from PostgREST OpenAPI schema
+    final discoveredTables = await _discoverTablesFromSchema(projectUrl, headers);
+
+    // Combine discovered tables with common table names
+    final allTablesToCheck = <String>{
+      ...discoveredTables,
+      ..._commonTableNames,
+    };
+
+    // Try each table name
+    for (final tableName in allTablesToCheck) {
+      if (checkedTables.contains(tableName)) continue;
+      checkedTables.add(tableName);
+
       try {
         final url = Uri.parse(
           '$projectUrl/rest/v1/$tableName?select=*&limit=5',
@@ -355,6 +421,58 @@ class SupabaseService {
     }
 
     return exposedTables;
+  }
+
+  /// Discovers available tables from PostgREST OpenAPI schema endpoint
+  static Future<List<String>> _discoverTablesFromSchema(
+    String projectUrl,
+    Map<String, String> headers,
+  ) async {
+    final tables = <String>[];
+
+    try {
+      // PostgREST exposes an OpenAPI schema at the root
+      final url = Uri.parse('$projectUrl/rest/v1/');
+      final response = await http.get(url, headers: headers).timeout(
+            const Duration(seconds: 10),
+          );
+
+      if (response.statusCode == 200) {
+        final dynamic data = jsonDecode(response.body);
+
+        // OpenAPI 3.0 format - paths contain table endpoints
+        if (data is Map && data.containsKey('paths')) {
+          final paths = data['paths'] as Map<String, dynamic>;
+          for (final path in paths.keys) {
+            // Extract table name from path like "/tablename"
+            if (path.startsWith('/') && !path.contains('{')) {
+              final tableName = path.substring(1);
+              if (tableName.isNotEmpty && !tableName.contains('/')) {
+                tables.add(tableName);
+              }
+            }
+          }
+        }
+
+        // Try definitions/components schemas
+        if (data is Map && data.containsKey('definitions')) {
+          final definitions = data['definitions'] as Map<String, dynamic>;
+          tables.addAll(definitions.keys.where((k) => !k.startsWith('_')));
+        }
+
+        if (data is Map && data.containsKey('components')) {
+          final components = data['components'] as Map<String, dynamic>?;
+          final schemas = components?['schemas'] as Map<String, dynamic>?;
+          if (schemas != null) {
+            tables.addAll(schemas.keys.where((k) => !k.startsWith('_')));
+          }
+        }
+      }
+    } catch (e) {
+      // Schema discovery failed - fall back to common names
+    }
+
+    return tables;
   }
 
   static Future<SupabaseSecurityResult> checkMultipleCombinations({
