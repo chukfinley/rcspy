@@ -111,22 +111,39 @@ class AnalysisProvider extends ChangeNotifier {
   AnalysisProgress _progress = const AnalysisProgress();
   bool _isLoadingPackages = true;
   bool _isAnalyzing = false;
+  bool _hasStartedScan = false;
   int _newAppsCount = 0;
   AppFilter _currentFilter = AppFilter.all;
+  String _searchQuery = '';
 
   List<PackageInfo> get packages => _packages;
   AnalysisProgress get progress => _progress;
   bool get isLoadingPackages => _isLoadingPackages;
   bool get isAnalyzing => _isAnalyzing;
+  bool get hasStartedScan => _hasStartedScan;
+  String get searchQuery => _searchQuery;
   int get newAppsCount => _newAppsCount;
   AppFilter get currentFilter => _currentFilter;
 
   List<PackageInfo> get filteredPackages {
-    if (_currentFilter == AppFilter.all) {
-      return _packages;
+    var result = _packages;
+
+    // Apply search filter first
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      result = result.where((package) {
+        final name = (package.name ?? '').toLowerCase();
+        final id = (package.id ?? '').toLowerCase();
+        return name.contains(query) || id.contains(query);
+      }).toList();
     }
 
-    return _packages.where((package) {
+    // Then apply category filter
+    if (_currentFilter == AppFilter.all) {
+      return result;
+    }
+
+    return result.where((package) {
       final packageId = _getPackageId(package);
       final state = _analysisStates[packageId];
 
@@ -151,6 +168,13 @@ class AnalysisProvider extends ChangeNotifier {
           return !state.hasAnyBackend && state.apkResult?.error == null;
       }
     }).toList();
+  }
+
+  void setSearchQuery(String query) {
+    if (_searchQuery != query) {
+      _searchQuery = query;
+      notifyListeners();
+    }
   }
 
   void setFilter(AppFilter filter) {
@@ -237,6 +261,21 @@ class AnalysisProvider extends ChangeNotifier {
     );
 
     notifyListeners();
+    // Don't auto-scan - wait for user to press scan button
+  }
+
+  /// Start scanning apps that haven't been analyzed yet
+  Future<void> startScan() async {
+    if (_isAnalyzing) return;
+
+    _hasStartedScan = true;
+    notifyListeners();
+
+    final analyzedIds = StorageService.getAnalyzedPackageIds();
+    final newApps = _packages.where((p) {
+      final id = _getPackageId(p);
+      return !analyzedIds.contains(id);
+    }).toList();
 
     if (newApps.isNotEmpty) {
       await _analyzePackages(newApps, isFullReanalysis: false);
